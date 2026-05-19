@@ -16,7 +16,7 @@ def count_params(module):
     Returns:
         Total number of parameters.
     """
-    return sum(p.numel() for p in module.parameters())
+    pass
 
 
 def flatten_as_list(obj):

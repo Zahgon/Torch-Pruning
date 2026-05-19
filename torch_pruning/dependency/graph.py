@@ -436,22 +436,6 @@ class DependencyGraph(object):
         gradfn2module = {}
         visited = {}
         self._2d_4d = True # for pytorch<=1.8
-        def _record_grad_fn(module, inputs, outputs):
-            
-            if module not in visited:
-                visited[module] = 1
-            else:
-                visited[module] += 1
-            
-            if isinstance(module, nn.Linear) and len(outputs.shape)==3:
-                self._2d_4d=False
-
-            if isinstance(outputs, tuple):
-                outputs = outputs[0]
-            if isinstance(outputs, torch.nn.utils.rnn.PackedSequence):
-                outputs = outputs.data
-
-            gradfn2module[outputs.grad_fn] = module
             
 
         # Register hooks for prunable modules

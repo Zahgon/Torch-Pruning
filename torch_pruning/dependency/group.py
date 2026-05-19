@@ -76,11 +76,6 @@ class Group(object):
     def items(self):
         return self._group
 
-    def has_dep(self, dep):
-        for _dep, _ in self._group:
-            if dep == _dep:
-                return True
-        return False
 
     def has_pruning_op(self, dep: Dependency, idxs: _helpers._HybridIndex):
         for _dep, _idxs in self._group:
@@ -136,8 +131,7 @@ class Group(object):
 
     def exec(self):
         """old interface, will be deprecated in the future."""
-        warnings.warn("Group.exec() will be deprecated in the future. Please use Group.prune() instead.")
-        self.prune()
+        pass
 
     def __call__(self):
         return self.prune()

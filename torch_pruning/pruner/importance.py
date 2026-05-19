@@ -98,84 +98,9 @@ class GroupMagnitudeImportance(Importance):
         """
         Normalizing scheme for LAMP.
         """
-        # sort scores in an ascending order
-        sorted_scores,sorted_idx = scores.view(-1).sort(descending=False)
-        # compute cumulative sum
-        scores_cumsum_temp = sorted_scores.cumsum(dim=0)
-        scores_cumsum = torch.zeros(scores_cumsum_temp.shape,device=scores.device)
-        scores_cumsum[1:] = scores_cumsum_temp[:len(scores_cumsum_temp)-1]
-        # normalize by cumulative sum
-        sorted_scores /= (scores.sum() - scores_cumsum)
-        # tidy up and output
-        new_scores = torch.zeros(scores_cumsum.shape,device=scores.device)
-        new_scores[sorted_idx] = sorted_scores
-        
-        return new_scores.view(scores.shape)
+        pass
     
-    def _normalize(self, group_importance, normalizer):
-        if normalizer is None:
-            return group_importance
-        elif isinstance(normalizer, typing.Callable):
-            return normalizer(group_importance)
-        elif normalizer == "sum":
-            return group_importance / group_importance.sum()
-        elif normalizer == "standarization":
-            return (group_importance - group_importance.min()) / (group_importance.max() - group_importance.min()+1e-8)
-        elif normalizer == "mean":
-            return group_importance / group_importance.mean()
-        elif normalizer == "max":
-            return group_importance / group_importance.max()
-        elif normalizer == 'gaussian':
-            return (group_importance - group_importance.mean()) / (group_importance.std()+1e-8)
-        elif normalizer.startswith('sentinel'): # normalize the score with the k-th smallest element. e.g. sentinel_0.5 means median normalization
-            sentinel = float(normalizer.split('_')[1]) * len(group_importance)
-            sentinel = torch.argsort(group_importance, dim=0, descending=False)[int(sentinel)]
-            return group_importance / (group_importance[sentinel]+1e-8)
-        elif normalizer=='lamp':
-            return self._lamp(group_importance)
-        else:
-            raise NotImplementedError
 
-    def _reduce(self, group_imp: typing.List[torch.Tensor], group_idxs: typing.List[typing.List[int]]):
-        if len(group_imp) == 0: return group_imp
-        if self.group_reduction == 'prod':
-            reduced_imp = torch.ones_like(group_imp[0], dtype=torch.float32)
-        elif self.group_reduction == 'max':
-            reduced_imp = torch.ones_like(group_imp[0], dtype=torch.float32) * -99999
-        else:
-            reduced_imp = torch.zeros_like(group_imp[0], dtype=torch.float32)
-        
-        n_imp = 0
-        for i, (imp, root_idxs) in enumerate(zip(group_imp, group_idxs)):
-            imp = imp.to(reduced_imp.device, dtype=reduced_imp.dtype)
-            if any([r is None for r in root_idxs]):
-                #warnings.warn("Root idxs contain None values. Skipping this layer...")
-                continue
-            if self.group_reduction == "sum" or self.group_reduction == "mean":
-                reduced_imp.scatter_add_(0, torch.tensor(root_idxs, device=imp.device), imp) # accumulated importance
-            elif self.group_reduction == "max": # keep the max importance
-                selected_imp = torch.index_select(reduced_imp, 0, torch.tensor(root_idxs, device=imp.device))
-                selected_imp = torch.maximum(input=selected_imp, other=imp)
-                reduced_imp.scatter_(0, torch.tensor(root_idxs, device=imp.device), selected_imp)
-            elif self.group_reduction == "prod": # product of importance
-                selected_imp = torch.index_select(reduced_imp, 0, torch.tensor(root_idxs, device=imp.device))
-                torch.mul(selected_imp, imp, out=selected_imp)
-                reduced_imp.scatter_(0, torch.tensor(root_idxs, device=imp.device), selected_imp)
-            elif self.group_reduction == 'first':
-                if i == 0:
-                    reduced_imp.scatter_(0, torch.tensor(root_idxs, device=imp.device), imp)
-            elif self.group_reduction == 'gate':
-                if i == len(group_imp)-1:
-                    reduced_imp.scatter_(0, torch.tensor(root_idxs, device=imp.device), imp)
-            elif self.group_reduction is None:
-                reduced_imp = torch.stack(group_imp, dim=0) # no reduction
-            else:
-                raise NotImplementedError
-            n_imp += 1
-
-        if self.group_reduction == "mean":
-            reduced_imp /= n_imp
-        return reduced_imp
     
     @torch.no_grad()
     def __call__(self, group: Group):
@@ -598,11 +523,7 @@ class OBDCImportance(GroupMagnitudeImportance):
             m._backward_hooks = OrderedDict()
             m._forward_pre_hooks = OrderedDict()
 
-    def _save_input(self, module, input):
-        self.A[module] = input[0].data
 
-    def _save_grad_output(self, module, grad_input, grad_output):
-        self.DS[module] = grad_output[0].data
 
     def _prepare_model(self, model, pruner):
         for group in pruner.DG.get_all_groups(ignored_layers=pruner.ignored_layers, root_module_types=pruner.root_module_types): 
@@ -830,29 +751,6 @@ from contextlib import contextmanager
 
 class ActivationImportance(GroupMagnitudeImportance):
 
-    @contextmanager
-    def compute_importance(self, model):
-        
-        @torch.no_grad()
-        def _compute_importance_hook(module, input, output):
-
-            if isinstance(module, nn.Linear):
-                dim = input[0].shape[-1]
-                module._importance = input[0].abs().view(-1, dim).sum(0)
-            elif isinstance(module, nn.Conv2d):
-                dim = input[0].shape[1]
-                module._importance = input[0].abs().mean((0, 2, 3))
-            return 
-        
-        hooks = []
-        for m in model.modules():
-            if isinstance(m, tuple(self.target_types)):
-                hooks.append(m.register_forward_hook(_compute_importance_hook))
-        
-        yield
-
-        for h in hooks:
-            h.remove()
 
     @torch.no_grad()
     def __call__(self, group):

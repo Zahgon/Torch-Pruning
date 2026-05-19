@@ -135,31 +135,7 @@ def update_slice_index_mapping(graph, slice_node: Node):
 
 def update_flatten_index_mapping(graph, fc_node: Node):
     """Update index mapping for flatten operations."""
-    if fc_node.type != ops.OPTYPE.LINEAR:
-        return
-    fc_in_features = fc_node.module.in_features
-    feature_channels = 0
-    for n in fc_node.inputs:
-        recursive_depth = [0]
-        feature_channels = shape_infer._infer_out_channels_recursively(graph, n, recursive_depth)
-        if feature_channels is not None:
-            break
-                
-    if feature_channels is None:  # the first layer: https://github.com/VainF/Torch-Pruning/issues/21
-        return
-    stride = fc_in_features // feature_channels
-    if stride > 1 and fc_in_features % feature_channels == 0:
-        for in_node in fc_node.inputs:
-            for dep in fc_node.dependencies:
-                if dep.target == in_node:
-                    dep.index_mapping[0] = _FlattenIndexMapping(
-                        stride=stride, reverse=True
-                    )
-            for dep in in_node.dependencies:
-                if dep.target == fc_node:
-                    dep.index_mapping[0] = _FlattenIndexMapping(
-                        stride=stride, reverse=False
-                    )
+    pass
 
 def update_reshape_index_mapping(graph, reshape_node: Node):
     

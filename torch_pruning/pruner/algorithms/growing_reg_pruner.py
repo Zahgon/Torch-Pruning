@@ -119,16 +119,6 @@ class GrowingRegPruner(BasePruner):
         self.group_reg = group_reg
         self.delta_reg = delta_reg
 
-    def update_reg(self):
-        for group in self._groups:
-            group_l2norm_sq = self.estimate_importance(group)
-            if group_l2norm_sq is None:
-                continue
-            reg = self.group_reg[group]
-            standarized_imp = (group_l2norm_sq.max() - group_l2norm_sq) / \
-                (group_l2norm_sq.max() - group_l2norm_sq.min() + 1e-8)  # => [0, 1]
-            reg = reg + self.delta_reg * standarized_imp.to(reg.device)
-            self.group_reg[group] = reg
 
     def update_regularizer(self):
         # Update the group list after pruning

@@ -33,14 +33,6 @@ def to_root_idxs(idxs: _HybridIndex):
         return idxs
     return [i.root_idx for i in idxs]
 
-def is_scalar(x):
-    if isinstance(x, torch.Tensor):
-        return len(x.shape) == 0
-    elif isinstance(x, Number):
-        return True
-    elif isinstance(x, (list, tuple)):
-        return False
-    return False
 
 class ScalarSum:
     def __init__(self):
@@ -51,11 +43,7 @@ class ScalarSum:
             self._results[metric_name] = 0
         self._results[metric_name] += metric_value
 
-    def results(self):
-        return self._results
 
-    def reset(self):
-        self._results = {}
 
 
 class VectorSum:
@@ -72,8 +60,4 @@ class VectorSum:
                 map(add, self._results[metric_name], metric_value)
             )
 
-    def results(self):
-        return self._results
 
-    def reset(self):
-        self._results = {}

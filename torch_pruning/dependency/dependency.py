@@ -98,12 +98,12 @@ class Dependency(object):
     @property
     def layer(self):
         """Alias of the target module."""
-        return self.target.module
+        pass
 
     @property
     def pruning_fn(self):
         """Alias of the handler."""
-        return self.handler
+        pass
 
     def __hash__(self):
         return hash((self.source, self.target, self.trigger, self.handler))

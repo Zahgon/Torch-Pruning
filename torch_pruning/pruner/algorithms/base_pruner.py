@@ -291,22 +291,7 @@ class BasePruner:
             pruning_fn: The pruning function to use.
             pruning_ratios_or_idxs: Either a pruning ratio (float) or list of indices to prune.
         """
-        if isinstance(pruning_ratios_or_idxs, float):
-            if self.DG.is_out_channel_pruning_fn(pruning_fn):
-                prunable_channels = self.DG.get_out_channels(layer)
-            else:
-                prunable_channels = self.DG.get_in_channels(layer)
-            full_group = self.DG.get_pruning_group(
-                layer, pruning_fn, list(range(prunable_channels)))
-            imp = self.estimate_importance(full_group)
-            imp_argsort = torch.argsort(imp)
-            n_pruned = int(prunable_channels * (1 - pruning_ratios_or_idxs))
-            pruning_idxs = imp_argsort[:n_pruned]
-        else:
-            pruning_idxs = pruning_ratios_or_idxs
-
-        group = self.DG.get_pruning_group(layer, pruning_fn, pruning_idxs)
-        group.prune()
+        pass
 
     def estimate_importance(self, group) -> torch.Tensor:
         """Estimate importance scores for a pruning group.
@@ -337,8 +322,6 @@ class BasePruner:
             self.current_step]
         return min(s, 1)
 
-    def reset(self) -> None:
-        self.current_step = 0
 
     def update_regularizer(self) -> None:
         pass

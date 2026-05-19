@@ -96,8 +96,6 @@ class DummyPruner(object):
     def __call__(self, layer, *args, **kargs):
         return layer
 
-    def prune_out_channels(self, layer, idxs):
-        return layer
 
     prune_in_channels = prune_out_channels
 
@@ -121,10 +119,6 @@ class ExpandPruner(DummyPruner):
     pass
 
 class OutputPruner(DummyPruner):
-    def prune_out_channels(self, layer, idxs):
-        if layer.shape is None:
-            return
-        layer.shape[1] -= len(idxs)
     prune_in_channels = prune_out_channels
 
     def get_in_channels(self, layer):
@@ -138,68 +132,15 @@ class OutputPruner(DummyPruner):
     get_out_channels = get_in_channels
 
 class ConcatPruner(DummyPruner):
-    def prune_out_channels(self, layer, idxs):
-        if layer.concat_sizes is None:
-            return
-        new_concat_sizes = layer.concat_sizes.copy()
-        concat_sizes = layer.concat_sizes
-        offsets = [0]
-        for i in range(len(concat_sizes)):
-            offsets.append(offsets[i] + concat_sizes[i])
-        for idx in idxs: # find the ID of the concat
-            for i in range(len(offsets)-1):
-                if idx >= offsets[i] and idx < offsets[i+1]:
-                    concat_sizes[i] -= 1
-                    break
-            new_concat_sizes[i]-=1
-        layer.concat_sizes = new_concat_sizes
-        offsets = [0]
-        for i in range(len(new_concat_sizes)):
-            offsets.append(offsets[i] + new_concat_sizes[i])
-        self.offsets = offsets
 
     prune_in_channels = prune_out_channels
 
 
 class SlicePruner(DummyPruner):
-    def prune_out_channels(self, layer, idxs):
-        if layer.grad_fn is None:
-            return
-        offset_start = 0
-        offset_end = 0
-        for i in idxs:
-            if i < layer.start:
-                offset_start += 1
-                offset_end += 1
-            elif i >= layer.start and i < layer.end:
-                offset_end += layer.step
-        layer.start -= offset_start
-        layer.end -= offset_end        
     
     prune_in_channels = prune_out_channels
 
 class SplitPruner(DummyPruner):
-    def prune_out_channels(self, layer, idxs):
-        if layer.split_sizes is None:
-            return
-        new_split_sizes = layer.split_sizes.copy()
-        split_sizes = layer.split_sizes
-        #offsets = layer.offsets
-        # accumulate split_sizes
-        offsets = [0]
-        for i in range(len(split_sizes)):
-            offsets.append(offsets[i] + split_sizes[i])
-        for idx in idxs: # find the ID of the split
-            for i in range(len(offsets)-1):
-                if idx >= offsets[i] and idx < offsets[i+1]:
-                    split_sizes[i] -= 1
-                    break
-            new_split_sizes[i]-=1
-        layer.split_sizes = new_split_sizes
-        offsets = [0]
-        for i in range(len(new_split_sizes)):
-            offsets.append(offsets[i] + new_split_sizes[i])
-        self.offsets = offsets
 
     prune_in_channels = prune_out_channels
         

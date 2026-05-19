@@ -93,24 +93,7 @@ class BasePruningFunc(ABC):
         Raises:
             AssertionError: If validation fails.
         """
-        if self.TARGET_MODULES is not None:
-            if not isinstance(layer, self.TARGET_MODULES):
-                raise AssertionError(
-                    f'Mismatched pruner {self.__class__.__name__} and module {type(layer).__name__}'
-                )
-        
-        if to_output:
-            prunable_channels = self.get_out_channels(layer)
-        else:
-            prunable_channels = self.get_in_channels(layer)
-            
-        if prunable_channels is not None:
-            invalid_indices = [idx for idx in idxs if not (0 <= idx < prunable_channels)]
-            if invalid_indices:
-                raise AssertionError(
-                    f"All pruning indices should fall into [0, {prunable_channels}). "
-                    f"Invalid indices: {invalid_indices}"
-                )
+        pass
 
     def __call__(self, layer: nn.Module, idxs: Sequence[int], to_output: bool = True, 
                  inplace: bool = True, dry_run: bool = False) -> Tuple[nn.Module, int]:
@@ -141,41 +124,11 @@ class BasePruningFunc(ABC):
     def get_out_channel_groups(self, layer):
         return 1
 
-    def _prune_parameter_and_grad(self, weight, keep_idxs, pruning_dim):
-        pruned_weight = torch.nn.Parameter(torch.index_select(weight, pruning_dim, torch.LongTensor(keep_idxs).to(weight.device).contiguous()))
-        if weight.grad is not None:
-            pruned_weight.grad = torch.index_select(weight.grad, pruning_dim, torch.LongTensor(keep_idxs).to(weight.device))
-        return pruned_weight.to(weight.device)
 
 class ConvPruner(BasePruningFunc):
     TARGET_MODULE = ops.TORCH_CONV
 
-    def prune_out_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
-        keep_idxs = list(set(range(layer.out_channels)) - set(idxs))
-        keep_idxs.sort()
-        layer.out_channels = layer.out_channels-len(idxs)
-        if not layer.transposed:
-            layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
-        else:
-            layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 1)
-        
-        if layer.bias is not None:
-            layer.bias = self._prune_parameter_and_grad(layer.bias, keep_idxs, 0)
-        return layer
 
-    def prune_in_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
-        keep_idxs = list(set(range(layer.in_channels)) - set(idxs))
-        keep_idxs.sort()
-        layer.in_channels = layer.in_channels - len(idxs)
-        if layer.groups>1:
-            keep_idxs = keep_idxs[:len(keep_idxs)//layer.groups]
-        
-        if not layer.transposed:
-            layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 1)
-        else:
-            layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
-        # no bias pruning because it does not change the output channels
-        return layer
 
     def get_out_channels(self, layer):
         return layer.out_channels
@@ -193,16 +146,6 @@ class ConvPruner(BasePruningFunc):
 class DepthwiseConvPruner(ConvPruner):
     TARGET_MODULE = ops.TORCH_CONV
 
-    def prune_out_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
-        keep_idxs = list(set(range(layer.out_channels)) - set(idxs))
-        keep_idxs.sort()
-        layer.out_channels = layer.out_channels-len(idxs)
-        layer.in_channels = layer.in_channels-len(idxs)
-        layer.groups = layer.groups-len(idxs)
-        layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
-        if layer.bias is not None:
-            layer.bias = self._prune_parameter_and_grad(layer.bias, keep_idxs, 0)
-        return layer
 
     prune_in_channels = prune_out_channels
     # def prune_input(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
@@ -212,21 +155,7 @@ class DepthwiseConvPruner(ConvPruner):
 class LinearPruner(BasePruningFunc):
     TARGET_MODULES = ops.TORCH_LINEAR
 
-    def prune_out_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
-        keep_idxs = list(set(range(layer.out_features)) - set(idxs))
-        keep_idxs.sort()
-        layer.out_features = layer.out_features-len(idxs)
-        layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
-        if layer.bias is not None:
-            layer.bias = self._prune_parameter_and_grad(layer.bias, keep_idxs, 0)
-        return layer
 
-    def prune_in_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
-        keep_idxs = list(set(range(layer.in_features)) - set(idxs))
-        keep_idxs.sort()
-        layer.in_features = layer.in_features-len(idxs)
-        layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 1)
-        return layer
 
     def get_out_channels(self, layer):
         return layer.out_features
@@ -238,18 +167,6 @@ class LinearPruner(BasePruningFunc):
 class BatchnormPruner(BasePruningFunc):
     TARGET_MODULES = ops.TORCH_BATCHNORM
 
-    def prune_out_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
-        keep_idxs = list(set(range(layer.num_features)) - set(idxs))
-        keep_idxs.sort()
-        layer.num_features = layer.num_features-len(idxs)
-        if layer.track_running_stats:
-            layer.running_mean = layer.running_mean.data[keep_idxs]
-            layer.running_var = layer.running_var.data[keep_idxs]
-
-        if layer.affine:
-            layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
-            layer.bias = self._prune_parameter_and_grad(layer.bias, keep_idxs, 0)
-        return layer
 
     prune_in_channels = prune_out_channels
     # def prune_in_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
@@ -269,27 +186,7 @@ class LayernormPruner(BasePruningFunc):
         super().__init__(metrcis)
         self.pruning_dim = pruning_dim
 
-    def check(self, layer, idxs):
-        layer.dim = self.pruning_dim
 
-    def prune_out_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
-        pruning_dim = self.pruning_dim
-        if len(layer.normalized_shape) < -pruning_dim:
-            return layer
-        num_features = layer.normalized_shape[pruning_dim]
-        keep_idxs = torch.tensor(list(set(range(num_features)) - set(idxs)))
-        keep_idxs.sort()
-        if layer.elementwise_affine:
-            layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, pruning_dim)
-            if layer.bias is not None:
-                layer.bias = self._prune_parameter_and_grad(layer.bias, keep_idxs, pruning_dim)
-        if pruning_dim != -1:
-            layer.normalized_shape = layer.normalized_shape[:pruning_dim] + (
-                keep_idxs.size(0), ) + layer.normalized_shape[pruning_dim+1:]
-        else:
-            layer.normalized_shape = layer.normalized_shape[:pruning_dim] + (
-                keep_idxs.size(0), )
-        return layer
 
     prune_in_channels = prune_out_channels
 
@@ -300,14 +197,6 @@ class LayernormPruner(BasePruningFunc):
         return layer.normalized_shape[self.pruning_dim]
 
 class GroupNormPruner(BasePruningFunc):
-    def prune_out_channels(self, layer: nn.PReLU, idxs: list) -> nn.Module:
-        keep_idxs = list(set(range(layer.num_channels)) - set(idxs))
-        keep_idxs.sort()
-        layer.num_channels = layer.num_channels-len(idxs)
-        if layer.affine:
-            layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
-            layer.bias = self._prune_parameter_and_grad(layer.bias, keep_idxs, 0)
-        return layer
     
     prune_in_channels = prune_out_channels
 
@@ -324,14 +213,6 @@ class GroupNormPruner(BasePruningFunc):
         return layer.num_groups
 
 class InstanceNormPruner(BasePruningFunc):
-    def prune_out_channels(self, layer: nn.Module, idxs: Sequence[int]) -> nn.Module:
-        keep_idxs = list(set(range(layer.num_features)) - set(idxs))
-        keep_idxs.sort()
-        layer.num_features = layer.num_features-len(idxs)
-        if layer.affine:
-            layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
-            layer.bias = self._prune_parameter_and_grad(layer.bias, keep_idxs, 0)
-        return layer
 
     prune_in_channels = prune_out_channels
 
@@ -345,14 +226,6 @@ class InstanceNormPruner(BasePruningFunc):
 class PReLUPruner(BasePruningFunc):
     TARGET_MODULES = ops.TORCH_PRELU
 
-    def prune_out_channels(self, layer: nn.PReLU, idxs: list) -> nn.Module:
-        if layer.num_parameters == 1:
-            return layer
-        keep_idxs = list(set(range(layer.num_parameters)) - set(idxs))
-        keep_idxs.sort()
-        layer.num_parameters = layer.num_parameters-len(idxs)
-        layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 0)
-        return layer
 
     prune_in_channels = prune_out_channels
 
@@ -371,13 +244,6 @@ class PReLUPruner(BasePruningFunc):
 class EmbeddingPruner(BasePruningFunc):
     TARGET_MODULES = ops.TORCH_EMBED
 
-    def prune_out_channels(self, layer: nn.Embedding, idxs: list) -> nn.Module:
-        num_features = layer.embedding_dim
-        keep_idxs = list(set(range(num_features)) - set(idxs))
-        keep_idxs.sort()
-        layer.weight = self._prune_parameter_and_grad(layer.weight, keep_idxs, 1)
-        layer.embedding_dim = len(keep_idxs)
-        return layer
 
     prune_in_channels = prune_out_channels
 
@@ -393,44 +259,7 @@ class EmbeddingPruner(BasePruningFunc):
 class LSTMPruner(BasePruningFunc):
     TARGET_MODULES = ops.TORCH_LSTM
 
-    def prune_out_channels(self, layer: nn.LSTM, idxs: list) -> nn.Module:
-        assert layer.num_layers==1
-        num_layers = layer.num_layers
-        num_features = layer.hidden_size
-        keep_idxs = list(set(range(num_features)) - set(idxs))
-        keep_idxs.sort()
-        keep_idxs = torch.tensor(keep_idxs)
-        expanded_keep_idxs = torch.cat([ keep_idxs+i*num_features for i in range(4) ], dim=0)
-        if layer.bidirectional:
-            postfix = ['', '_reverse']
-        else:
-            postfix = ['']
-        #for l in range(num_layers):
-        for pf in postfix:
-            setattr(layer, 'weight_hh_l0'+pf, self._prune_parameter_and_grad(
-                getattr(layer, 'weight_hh_l0'+pf), keep_idxs, 0))
-            if layer.bias:
-                setattr(layer, 'bias_hh_l0'+pf, self._prune_parameter_and_grad(
-                    getattr(layer, 'bias_hh_l0'+pf), keep_idxs, 0))
-            setattr(layer, 'weight_hh_l0'+pf, self._prune_parameter_and_grad(
-                getattr(layer, 'weight_hh_l0'+pf), keep_idxs, 0))
-            setattr(layer, 'weight_ih_l0'+pf,  self._prune_parameter_and_grad(
-                getattr(layer, 'weight_ih_l0'+pf), expanded_keep_idxs, 1))
-            if layer.bias:
-                setattr(layer, 'bias_ih_l0'+pf, self._prune_parameter_and_grad(
-                    getattr(layer, 'bias_ih_l0'+pf), keep_idxs, 0))
-        layer.hidden_size = len(keep_idxs)
 
-    def prune_in_channels(self, layer: nn.LSTM, idxs: list):
-        num_features = layer.input_size
-        keep_idxs = list(set(range(num_features)) - set(idxs))
-        keep_idxs.sort()
-        setattr(layer, 'weight_ih_l0', self._prune_parameter_and_grad(
-                    getattr(layer, 'weight_ih_l0'), keep_idxs, 1))
-        if layer.bidirectional:
-            setattr(layer, 'weight_ih_l0_reverse', self._prune_parameter_and_grad(
-                    getattr(layer, 'weight_ih_l0_reverse'), keep_idxs, 1))
-        layer.input_size = len(keep_idxs)
 
     def get_out_channels(self, layer):
         return layer.hidden_size
@@ -444,11 +273,6 @@ class ParameterPruner(BasePruningFunc):
     def __init__(self, pruning_dim=-1):
         super().__init__(pruning_dim=pruning_dim)
         
-    def prune_out_channels(self, tensor, idxs: list) -> nn.Module:
-        keep_idxs = list(set(range(tensor.data.shape[self.pruning_dim])) - set(idxs))
-        keep_idxs.sort()
-        pruned_parameter = self._prune_parameter_and_grad(tensor, keep_idxs, self.pruning_dim)
-        return pruned_parameter
 
     prune_in_channels = prune_out_channels
 
@@ -462,56 +286,7 @@ class ParameterPruner(BasePruningFunc):
 class MultiheadAttentionPruner(BasePruningFunc):
     TARGET_MODULES = ops.TORCH_MHA
 
-    def check(self, layer, idxs, to_output):
-        super().check(layer, idxs, to_output)
-        assert (layer.embed_dim - len(idxs)) % layer.num_heads == 0, "embed_dim (%d) of MultiheadAttention after pruning must divide evenly by `num_heads` (%d)" % (layer.embed_dim, layer.num_heads)
 
-    def prune_out_channels(self, layer, idxs: list) -> nn.Module:
-        keep_idxs = list(set(range(layer.embed_dim)) - set(idxs))
-        keep_idxs.sort()
-
-
-        if layer.q_proj_weight is not None:
-            layer.q_proj_weight = self._prune_parameter_and_grad(layer.q_proj_weight, keep_idxs, 0)
-        if layer.k_proj_weight is not None:
-            layer.k_proj_weight = self._prune_parameter_and_grad(layer.k_proj_weight, keep_idxs, 0)
-        if layer.v_proj_weight is not None:
-            layer.v_proj_weight = self._prune_parameter_and_grad(layer.v_proj_weight, keep_idxs, 0)
-
-
-        pruning_idxs_repeated = idxs + \
-            [i+layer.embed_dim for i in idxs] + \
-            [i+2*layer.embed_dim for i in idxs]
-        keep_idxs_3x_repeated = list(
-            set(range(3*layer.embed_dim)) - set(pruning_idxs_repeated))
-        keep_idxs_3x_repeated.sort()
-        if layer.in_proj_weight is not None:
-            layer.in_proj_weight = self._prune_parameter_and_grad(layer.in_proj_weight, keep_idxs_3x_repeated, 0)
-            layer.in_proj_weight = self._prune_parameter_and_grad(layer.in_proj_weight, keep_idxs, 1)
-        if layer.in_proj_bias is not None:
-            layer.in_proj_bias = self._prune_parameter_and_grad(layer.in_proj_bias, keep_idxs_3x_repeated, 0)
-
-        if layer.bias_k is not None:
-            layer.bias_k = self._prune_parameter_and_grad(layer.bias_k, keep_idxs, 2)
-        if layer.bias_v is not None:
-            layer.bias_v = self._prune_parameter_and_grad(layer.bias_v, keep_idxs, 2)
-
-        linear = layer.out_proj
-        keep_idxs = list(set(range(linear.out_features)) - set(idxs))
-        keep_idxs.sort()
-        linear.out_features = linear.out_features-len(idxs)
-        linear.weight = self._prune_parameter_and_grad(linear.weight, keep_idxs, 0)
-        if linear.bias is not None:
-            linear.bias = self._prune_parameter_and_grad(linear.bias, keep_idxs, 0)
-        keep_idxs = list(set(range(linear.in_features)) - set(idxs))
-        keep_idxs.sort()
-        linear.in_features = linear.in_features-len(idxs)
-        linear.weight = self._prune_parameter_and_grad(linear.weight, keep_idxs, 1)
-        layer.embed_dim = layer.embed_dim - len(idxs)
-        layer.head_dim = layer.embed_dim // layer.num_heads
-        layer.kdim = layer.embed_dim
-        layer.vdim = layer.embed_dim
-        return layer
 
     prune_in_channels = prune_out_channels
 
